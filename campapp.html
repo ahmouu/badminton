@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CampCount 露營帳務</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .card { margin-bottom: 20px; border: none; shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .balance-positive { color: #198754; font-weight: bold; }
+        .balance-negative { color: #dc3545; font-weight: bold; }
+        .btn-x { padding: 0px 8px; font-size: 0.8rem; }
+        
+        /* 過期活動的樣式 */
+        .trip-finished {
+            background-color: #e9ecef !important; /* 灰色背景 */
+            color: #6c757d !important; /* 灰色文字 */
+            border-left: 5px solid #6c757d !important;
+        }
+        .trip-finished .badge-status {
+            background-color: #6c757d !important;
+        }
+        .trip-active {
+            border-left: 5px solid #198754; /* 進行中是綠色邊條 */
+        }
+    </style>
+</head>
+<body>
+
+<div class="container py-4" style="max-width: 800px;">
+    <h2 class="text-center mb-4 fw-bold text-success">⛺ CampCount 露營帳務 <small class="text-muted fs-6">V3</small></h2>
+
+    <div id="page-list">
+        <div class="card p-4 shadow-sm">
+            <h5 class="mb-3">📅 建立新露營活動</h5>
+            <div class="row g-2">
+                <div class="col-md-6">
+                    <div class="input-group">
+                        <span class="input-group-text">起</span>
+                        <input type="date" id="newStartDate" class="form-control">
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="input-group">
+                        <span class="input-group-text">迄</span>
+                        <input type="date" id="newEndDate" class="form-control">
+                    </div>
+                </div>
+                <div class="col-md-12">
+                    <input type="text" id="newLoc" class="form-control" placeholder="地點 (例：苗栗星空營區)">
+                </div>
+                <div class="col-md-12">
+                    <button onclick="createTrip()" class="btn btn-primary w-100 fw-bold">建立活動</button>
+                </div>
+            </div>
+        </div>
+        
+        <h5 class="mt-4 mb-3 ps-2 border-start border-4 border-secondary">歷史活動紀錄</h5>
+        <div id="tripList" class="list-group shadow-sm"></div>
+        <div id="loading" class="text-center mt-3 text-muted">載入資料中...</div>
+    </div>
+
+    <div id="page-detail" style="display: none;">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <button onclick="showList()" class="btn btn-outline-secondary">← 返回列表</button>
+            <button onclick="deleteCurrentTrip()" class="btn btn-outline-danger btn-sm">🗑️ 刪除此活動</button>
+        </div>
+        
+        <h3 id="detailTitle" class="fw-bold mb-1"></h3>
+        <p id="detailDate" class="text-muted mb-4"></p>
+        
+        <div class="row">
+            <div class="col-md-5">
+                <div class="card p-3">
+                    <h6 class="fw-bold text-secondary">👥 1. 參加人員</h6>
+                    <div class="input-group mb-2">
+                        <input type="text" id="newPerson" class="form-control" placeholder="姓名">
+                        <button onclick="addParticipant()" class="btn btn-outline-primary">+</button>
+                    </div>
+                    <div id="participantList" class="d-flex flex-wrap gap-1"></div>
+                </div>
+
+                <div class="card p-3">
+                    <h6 class="fw-bold text-secondary">💰 2. 新增支出</h6>
+                    <input type="text" id="expItem" class="form-control mb-2" placeholder="項目 (如: 食材)">
+                    <input type="number" id="expCost" class="form-control mb-2" placeholder="金額">
+                    <select id="expPayer" class="form-select mb-2"><option>誰付錢?</option></select>
+                    <button onclick="addExpense()" class="btn btn-success w-100">新增紀錄</button>
+                </div>
+
+                <div class="card p-3">
+                    <h6 class="fw-bold text-secondary">⛺ 3. 公用裝備</h6>
+                    <div class="d-flex gap-2 mb-2">
+                        <input type="text" id="gearItem" class="form-control" style="flex: 2;" placeholder="裝備名稱">
+                        <input type="number" id="gearQty" class="form-control" style="flex: 1;" placeholder="數量" value="1">
+                    </div>
+                    <select id="gearProvider" class="form-select mb-2"><option>誰提供?</option></select>
+                    <button onclick="addGear()" class="btn btn-info text-white w-100">新增裝備</button>
+                </div>
+            </div>
+
+            <div class="col-md-7">
+                <div class="alert alert-warning text-center shadow-sm">
+                    <div class="fs-5">總支出: <strong>$<span id="totalCost">0</span></strong></div>
+                    <div class="text-muted small">平均每人: $<span id="avgCost">0</span></div>
+                </div>
+
+                <div class="card shadow-sm">
+                    <div class="card-header bg-dark text-white d-flex justify-content-between">
+                        <span>🧮 結算表</span>
+                        <span style="font-size: 0.8em; opacity: 0.8;">正=收錢 / 負=付錢</span>
+                    </div>
+                    <ul id="balanceList" class="list-group list-group-flush"></ul>
+                </div>
+
+                <div class="card p-3 bg-light">
+                    <h6 class="fw-bold border-bottom pb-2">🛒 購買清單</h6>
+                    <ul id="expenseList" class="list-group list-group-flush small bg-transparent"></ul>
+                </div>
+
+                <div class="card p-3 bg-light mt-3">
+                    <h6 class="fw-bold border-bottom pb-2">🎒 裝備清單</h6>
+                    <ul id="gearList" class="list-group list-group-flush small bg-transparent"></ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+    import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, arrayUnion, deleteDoc } 
+    from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+
+    // ---------------------------------------------------------
+    // 🔥 請在此處貼上您的 Firebase Config
+    // ---------------------------------------------------------
+    const firebaseConfig = {
+    apiKey: "AIzaSyDURgPj3n3Sbf1LJ9UUYdIZgogx1PB3RFA",
+    authDomain: "campapp-1ef27.firebaseapp.com",
+    projectId: "campapp-1ef27",
+    storageBucket: "campapp-1ef27.firebasestorage.app",
+    messagingSenderId: "675381855392",
+    appId: "1:675381855392:web:3168fa7bd761b46d95f5c5",
+    measurementId: "G-8NEWVV6BBN"
+  };
+    // ---------------------------------------------------------
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    let currentTripId = null;
+    let currentTripData = null;
+
+    // 綁定全域函式
+    window.createTrip = createTrip;
+    window.showList = showList;
+    window.addParticipant = addParticipant;
+    window.addExpense = addExpense;
+    window.addGear = addGear;
+    window.togglePaid = togglePaid;
+    window.deleteExpense = deleteExpense;
+    window.deleteParticipant = deleteParticipant;
+    window.deleteGear = deleteGear;
+    window.deleteCurrentTrip = deleteCurrentTrip;
+
+    // 1. 監聽列表 (包含過期判斷邏輯)
+    const tripListEl = document.getElementById('tripList');
+    const loadingEl = document.getElementById('loading');
+    
+    onSnapshot(collection(db, "trips"), (snapshot) => {
+        tripListEl.innerHTML = "";
+        loadingEl.style.display = 'none';
+        
+        let trips = [];
+        snapshot.forEach(doc => trips.push({id: doc.id, ...doc.data()}));
+        
+        // 依開始日期排序 (新到舊)
+        trips.sort((a, b) => new Date(b.startDate || b.date) - new Date(a.startDate || a.date));
+
+        const today = new Date();
+        today.setHours(0,0,0,0); // 只比較日期，忽略時間
+
+        trips.forEach(trip => {
+            // 相容性處理 (舊資料可能只有 date)
+            const start = trip.startDate || trip.date;
+            const end = trip.endDate || trip.date; 
+            
+            // 判斷是否過期
+            const endDateObj = new Date(end);
+            const isFinished = endDateObj < today;
+            
+            // 設定樣式
+            const listClass = isFinished ? 'trip-finished' : 'trip-active';
+            const badgeHtml = isFinished 
+                ? '<span class="badge badge-status">✅ 已結束</span>' 
+                : '<span class="badge bg-success">⛺ 進行中</span>';
+
+            tripListEl.innerHTML += `
+                <a href="#" onclick="window.loadTrip('${trip.id}')" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center ${listClass}">
+                    <div>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="fw-bold fs-5">${trip.location}</span>
+                            ${badgeHtml}
+                        </div>
+                        <small class="opacity-75">📅 ${start} ~ ${end}</small>
+                    </div>
+                    <span class="badge bg-light text-dark border">查看 ></span>
+                </a>`;
+        });
+    });
+
+    // 2. 建立新活動 (修改：存入開始與結束日期)
+    async function createTrip() {
+        const start = document.getElementById('newStartDate').value;
+        const end = document.getElementById('newEndDate').value;
+        const loc = document.getElementById('newLoc').value;
+        
+        if(!start || !end || !loc) return alert("請輸入完整日期與地點");
+        if(start > end) return alert("結束日期不能早於開始日期");
+
+        const btn = document.querySelector('button[onclick="createTrip()"]');
+        btn.disabled = true; btn.innerText = "建立中...";
+
+        await addDoc(collection(db, "trips"), {
+            startDate: start, // 新欄位
+            endDate: end,     // 新欄位
+            date: start,      // 保留舊欄位以防萬一
+            location: loc,
+            participants: [], expenses: [], gears: []         
+        });
+        document.getElementById('newLoc').value = '';
+        btn.disabled = false; btn.innerText = "建立活動";
+    }
+
+    async function deleteCurrentTrip() {
+        if(!confirm("確定要刪除整個活動紀錄嗎？此動作無法復原！")) return;
+        await deleteDoc(doc(db, "trips", currentTripId));
+        showList();
+    }
+
+    // 3. 載入活動
+    window.loadTrip = function(id) {
+        currentTripId = id;
+        document.getElementById('page-list').style.display = 'none';
+        document.getElementById('page-detail').style.display = 'block';
+        window.scrollTo(0,0);
+
+        onSnapshot(doc(db, "trips", id), (docSnap) => {
+            if (!docSnap.exists()) { showList(); return; }
+            currentTripData = docSnap.data();
+            renderDetail();
+        });
+    }
+
+    function showList() {
+        document.getElementById('page-list').style.display = 'block';
+        document.getElementById('page-detail').style.display = 'none';
+        currentTripId = null;
+    }
+
+    function renderDetail() {
+        const d = currentTripData;
+        const start = d.startDate || d.date; // 相容舊資料
+        const end = d.endDate || d.date;
+
+        document.getElementById('detailTitle').innerText = d.location;
+        document.getElementById('detailDate').innerText = `📅 ${start} ~ ${end}`;
+
+        // 下拉選單處理
+        const payerSelect = document.getElementById('expPayer');
+        const gearSelect = document.getElementById('gearProvider');
+        const currentPayer = payerSelect.value;
+        
+        payerSelect.innerHTML = '<option disabled selected>誰付錢?</option>';
+        gearSelect.innerHTML = '<option disabled selected>誰提供?</option>';
+        
+        // 參加者列表
+        const pList = document.getElementById('participantList');
+        pList.innerHTML = '';
+        d.participants.forEach((p, idx) => {
+            pList.innerHTML += `
+                <div class="btn-group btn-group-sm me-1 mb-1">
+                    <span class="btn btn-outline-secondary disabled text-dark">${p.name}</span>
+                    <button onclick="deleteParticipant(${idx})" class="btn btn-outline-danger btn-x">×</button>
+                </div>`;
+            payerSelect.innerHTML += `<option value="${p.name}">${p.name}</option>`;
+            gearSelect.innerHTML += `<option value="${p.name}">${p.name}</option>`;
+        });
+        if(currentPayer && currentPayer !== '誰付錢?') payerSelect.value = currentPayer;
+
+        // 購買清單
+        const expList = document.getElementById('expenseList');
+        expList.innerHTML = d.expenses.length === 0 ? '<li class="list-group-item text-muted text-center">尚無支出</li>' : '';
+        d.expenses.forEach((e, idx) => {
+            expList.innerHTML += `
+                <li class="list-group-item d-flex justify-content-between align-items-center bg-transparent ps-0">
+                    <div>
+                        <button onclick="deleteExpense(${idx})" class="btn btn-sm btn-link text-danger text-decoration-none p-0 me-2">🗑️</button>
+                        <span>${e.item} <small class="text-muted">(${e.payer})</small></span>
+                    </div>
+                    <span class="fw-bold">$${e.cost}</span>
+                </li>`;
+        });
+
+        // 裝備清單 (修改：顯示數量)
+        const gList = document.getElementById('gearList');
+        gList.innerHTML = d.gears.length === 0 ? '<li class="list-group-item text-muted text-center">尚無裝備</li>' : '';
+        d.gears.forEach((g, idx) => {
+            // 相容舊資料，若無數量則顯示 1
+            const qty = g.quantity || 1;
+            gList.innerHTML += `
+                <li class="list-group-item bg-transparent ps-0">
+                    <button onclick="deleteGear(${idx})" class="btn btn-sm btn-link text-danger text-decoration-none p-0 me-2">🗑️</button>
+                    ${g.item} <span class="badge bg-secondary">x ${qty}</span> 
+                    <span class="badge bg-info text-dark ms-1">${g.provider}</span>
+                </li>`;
+        });
+
+        // 計算邏輯
+        const totalCost = d.expenses.reduce((sum, e) => sum + Number(e.cost), 0);
+        const peopleCount = d.participants.length;
+        const avgCost = peopleCount > 0 ? totalCost / peopleCount : 0;
+
+        document.getElementById('totalCost').innerText = totalCost;
+        document.getElementById('avgCost').innerText = Math.round(avgCost);
+
+        const balList = document.getElementById('balanceList');
+        balList.innerHTML = '';
+        
+        d.participants.forEach((p, index) => {
+            const paid = d.expenses.filter(e => e.payer === p.name).reduce((sum, e) => sum + Number(e.cost), 0);
+            const balance = paid - avgCost;
+            
+            let balanceHtml = '';
+            if (balance > 1) balanceHtml = `<span class="balance-positive">應收 $${Math.round(balance)}</span>`;
+            else if (balance < -1) balanceHtml = `<span class="balance-negative">應付 $${Math.round(Math.abs(balance))}</span>`;
+            else balanceHtml = `<span class="text-muted">平帳</span>`;
+
+            balList.innerHTML += `
+                <li class="list-group-item d-flex justify-content-between align-items-center px-2">
+                    <div><strong>${p.name}</strong> <small class="text-muted">($${paid})</small></div>
+                    <div class="text-end">
+                        ${balanceHtml}
+                        <div class="mt-1">
+                        <button onclick="togglePaid(${index})" class="btn btn-sm ${p.status === 'paid' ? 'btn-success' : 'btn-outline-secondary'} py-0" style="font-size: 0.8rem">
+                            ${p.status === 'paid' ? '已結清' : '未付'}
+                        </button>
+                        </div>
+                    </div>
+                </li>`;
+        });
+    }
+
+    // --- 資料寫入邏輯 ---
+    async function addParticipant() {
+        const name = document.getElementById('newPerson').value;
+        if(!name) return;
+        await updateDoc(doc(db, "trips", currentTripId), {
+            participants: arrayUnion({ name: name, status: 'unpaid' })
+        });
+        document.getElementById('newPerson').value = '';
+    }
+
+    async function addExpense() {
+        const item = document.getElementById('expItem').value;
+        const cost = document.getElementById('expCost').value;
+        const payer = document.getElementById('expPayer').value;
+        if(!item || !cost || payer === '誰付錢?') return alert("資料不完整");
+
+        await updateDoc(doc(db, "trips", currentTripId), {
+            expenses: arrayUnion({ item, cost: Number(cost), payer })
+        });
+        document.getElementById('expItem').value = '';
+        document.getElementById('expCost').value = '';
+    }
+
+    async function addGear() {
+        const item = document.getElementById('gearItem').value;
+        const qty = document.getElementById('gearQty').value;
+        const provider = document.getElementById('gearProvider').value;
+        if(!item || provider === '誰提供?') return alert("資料不完整");
+
+        // 修改：加入 quantity
+        await updateDoc(doc(db, "trips", currentTripId), {
+            gears: arrayUnion({ item, quantity: Number(qty) || 1, provider })
+        });
+        document.getElementById('gearItem').value = '';
+        document.getElementById('gearQty').value = '1';
+    }
+
+    async function deleteItemFromArray(field, index) {
+        if(!confirm("確定要刪除這項目嗎？")) return;
+        const newList = [...currentTripData[field]];
+        newList.splice(index, 1);
+        await updateDoc(doc(db, "trips", currentTripId), { [field]: newList });
+    }
+
+    async function deleteParticipant(index) {
+        const name = currentTripData.participants[index].name;
+        const hasExpense = currentTripData.expenses.some(e => e.payer === name);
+        if(hasExpense) return alert(`無法刪除 ${name}，因為他還有付款紀錄。`);
+        await deleteItemFromArray('participants', index);
+    }
+
+    async function deleteExpense(index) { await deleteItemFromArray('expenses', index); }
+    async function deleteGear(index) { await deleteItemFromArray('gears', index); }
+
+    async function togglePaid(index) {
+        const newParticipants = [...currentTripData.participants];
+        newParticipants[index].status = newParticipants[index].status === 'paid' ? 'unpaid' : 'paid';
+        await updateDoc(doc(db, "trips", currentTripId), { participants: newParticipants });
+    }
+</script>
+</body>
+</html>
