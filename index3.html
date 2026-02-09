@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>羽毛球大師 (財務升級版)</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background-color: #f8fafc; font-family: 'Segoe UI', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .modal-enter-active, .modal-leave-active { transition: opacity 0.3s ease; }
+        .modal-enter-from, .modal-leave-to { opacity: 0; }
+        .list-move, .list-enter-active, .list-leave-active { transition: all 0.4s ease; }
+        .list-enter-from, .list-leave-to { opacity: 0; transform: translateX(20px); }
+        .list-leave-active { position: absolute; }
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div id="app" class="max-w-2xl mx-auto min-h-screen bg-white shadow-2xl relative flex flex-col">
+    
+    <header class="bg-slate-900 text-white p-4 shadow-md sticky top-0 z-30 flex justify-between items-center gap-2">
+        <h1 class="text-xl font-bold flex items-center shrink-0">
+            <i class="fa-solid fa-cloud text-emerald-400 mr-2"></i> 羽毛球大師
+        </h1>
+        
+        <div class="flex items-center gap-2 overflow-x-auto no-scrollbar">
+            <div v-if="isCloudEnabled" class="flex items-center text-xs px-2 py-1 rounded-full border border-slate-700 bg-slate-800 shrink-0">
+                <span v-if="syncStatus === 'syncing'" class="flex items-center text-yellow-400"><div class="loader mr-2 border-yellow-400 border-t-transparent"></div> 同步中</span>
+                <span v-else-if="syncStatus === 'success'" class="text-emerald-400"><i class="fa-solid fa-check mr-1"></i></span>
+                <span v-else-if="syncStatus === 'error'" class="text-red-400"><i class="fa-solid fa-exclamation-circle"></i></span>
+            </div>
+            
+            <button @click="view = 'finance'" :class="view === 'finance' ? 'bg-indigo-600' : 'bg-slate-700'" class="text-sm px-3 py-1.5 rounded hover:bg-slate-600 transition shrink-0 font-bold">
+                <i class="fa-solid fa-file-invoice-dollar"></i> 財務
+            </button>
+
+            <button v-if="view === 'list'" @click="startNewEvent" class="text-sm bg-emerald-600 text-white px-3 py-1.5 rounded hover:bg-emerald-500 transition shadow font-bold shrink-0">
+                <i class="fa-solid fa-plus mr-1"></i> 新增
+            </button>
+
+            <button @click="showConfigModal = true" class="text-sm bg-slate-700 px-3 py-1.5 rounded hover:bg-slate-600 transition shrink-0">
+                <i class="fa-solid fa-gear"></i>
+            </button>
+
+            <button v-if="view !== 'list'" @click="view = 'list'" class="text-sm bg-slate-700 px-3 py-1.5 rounded hover:bg-slate-600 transition shrink-0">
+                <i class="fa-solid fa-arrow-left"></i>
+            </button>
+        </div>
+    </header>
+
+    <div v-if="view === 'list'" class="p-4 flex-1 overflow-y-auto pb-24">
+        <div v-if="!isCloudEnabled" class="bg-blue-50 border border-blue-200 p-4 rounded-xl mb-6 text-center shadow-sm">
+            <p class="text-sm text-blue-600 mb-2"><i class="fa-solid fa-info-circle"></i> 資料僅存在本機。如需跨裝置，請設定雲端。</p>
+            <button @click="showConfigModal = true" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow hover:bg-blue-700">設定同步</button>
+        </div>
+
+        <div v-if="events.length === 0" class="text-center text-gray-400 mt-10">
+            <i class="fa-regular fa-folder-open text-6xl mb-4 opacity-20"></i>
+            <p>暫無記錄</p>
+        </div>
+
+        <div v-for="event in sortedEvents" :key="event.id" @click="openEvent(event.id)" 
+             class="bg-white border border-gray-200 rounded-xl p-4 mb-4 cursor-pointer hover:shadow-md transition relative overflow-hidden group"
+             :class="isPast(event.date) ? 'opacity-60 grayscale hover:grayscale-0 hover:opacity-100' : 'hover:border-emerald-400'">
+            
+            <div class="absolute top-0 left-0 w-1.5 h-full" :class="getEventBalance(event) >= 0 ? 'bg-emerald-500' : 'bg-red-500'"></div>
+            <div class="pl-3">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h3 class="font-bold text-lg text-gray-800 flex items-center">
+                            {{ event.date }} 
+                            <span class="text-sm font-normal text-gray-500 ml-1">({{ getWeekDay(event.date) }})</span>
+                            <span v-if="isPast(event.date)" class="ml-2 text-xs bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded">已完結</span>
+                        </h3>
+                        <div class="mt-1">
+                            <span v-for="(loc, idx) in event.locations" :key="idx" class="inline-block bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded mr-1 font-bold border border-indigo-100">
+                                <i class="fa-solid fa-location-dot mr-1"></i>{{ loc }}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="text-xs font-bold px-2 py-1 rounded bg-slate-100 text-slate-600">
+                        <i class="fa-solid fa-users mr-1"></i> {{ event.participants.length }} / {{ event.maxParticipants || 7 }}
+                        <span v-if="event.waitingList && event.waitingList.length > 0" class="text-orange-500 ml-1">(+{{ event.waitingList.length }})</span>
+                    </div>
+                </div>
+                <div class="flex justify-between items-end mt-3 border-t pt-2 border-gray-100">
+                    <div class="text-xs text-gray-400">訂場: {{ event.bookings.length }} 節</div>
+                    <div class="text-sm font-bold" :class="getEventBalance(event) >= 0 ? 'text-emerald-600' : 'text-red-500'">
+                        {{ getEventBalance(event) >= 0 ? '盈餘' : '赤字' }} ${{ Math.abs(getEventBalance(event)) }}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div v-if="view === 'finance'" class="flex-1 overflow-y-auto bg-slate-50 pb-24">
+        <div class="bg-white p-5 border-b shadow-sm sticky top-0 z-20">
+            <h2 class="text-xl font-bold text-gray-800 mb-4"><i class="fa-solid fa-calculator text-indigo-600 mr-2"></i>財務統計</h2>
+            
+            <div class="flex gap-2 items-center bg-gray-50 p-3 rounded-lg border border-gray-200 mb-4">
+                <input type="date" v-model="financeStart" class="w-1/2 p-2 text-sm border rounded bg-white font-bold text-gray-700">
+                <span class="text-gray-400">至</span>
+                <input type="date" v-model="financeEnd" class="w-1/2 p-2 text-sm border rounded bg-white font-bold text-gray-700">
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 mb-2">
+                <div class="bg-emerald-50 p-3 rounded-xl border border-emerald-100">
+                    <div class="text-xs text-emerald-600 font-bold mb-1">期間活動總盈餘</div>
+                    <div class="text-2xl font-bold text-emerald-700">+{{ financeStats.periodEventSurplus }}</div>
+                    <div class="text-[10px] text-emerald-400 mt-1">
+                        收入 ${{ financeStats.income }} - 場費 ${{ financeStats.courtCost }}
+                    </div>
+                </div>
+                <div class="bg-red-50 p-3 rounded-xl border border-red-100">
+                    <div class="text-xs text-red-600 font-bold mb-1">期間雜項支出</div>
+                    <div class="text-2xl font-bold text-red-700">-{{ financeStats.periodExpenses }}</div>
+                    <div class="text-[10px] text-red-400 mt-1">
+                        買波 / 聚餐 / 雜費
+                    </div>
+                </div>
+            </div>
+            
+            <div class="bg-slate-800 text-white p-4 rounded-xl shadow-lg flex justify-between items-center mt-2">
+                <span class="text-sm font-bold text-slate-300">最終淨結餘</span>
+                <span class="text-3xl font-bold" :class="financeStats.finalBalance >= 0 ? 'text-emerald-400' : 'text-red-400'">
+                    ${{ financeStats.finalBalance }}
+                </span>
+            </div>
+        </div>
+
+        <div class="p-4">
+            <h3 class="font-bold text-gray-700 mb-3 text-sm flex items-center">
+                <i class="fa-solid fa-receipt mr-2"></i> 雜項支出記錄
+            </h3>
+
+            <div class="bg-white p-3 rounded-lg shadow-sm border border-gray-200 mb-4">
+                <div class="flex gap-2 mb-2">
+                    <input type="date" v-model="newExpense.date" class="border rounded p-2 text-sm bg-gray-50 w-1/3">
+                    <input type="text" v-model="newExpense.desc" placeholder="項目 (例如: 買波)" class="border rounded p-2 text-sm flex-1">
+                </div>
+                <div class="flex gap-2">
+                    <input type="number" v-model.number="newExpense.amount" placeholder="金額" class="border rounded p-2 text-sm flex-1">
+                    <button @click="addExpense" class="bg-indigo-600 text-white px-4 py-2 rounded text-sm font-bold hover:bg-indigo-700">
+                        新增
+                    </button>
+                </div>
+            </div>
+
+            <div class="space-y-2">
+                <div v-for="(exp, idx) in financeStats.filteredExpenses" :key="exp.id" class="bg-white p-3 rounded-lg border border-gray-200 flex justify-between items-center">
+                    <div>
+                        <div class="font-bold text-gray-800">{{ exp.desc }}</div>
+                        <div class="text-xs text-gray-500">{{ exp.date }}</div>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span class="font-bold text-red-600 text-lg">-${{ exp.amount }}</span>
+                        <button @click="deleteExpense(exp.id)" class="text-gray-300 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                </div>
+                <div v-if="financeStats.filteredExpenses.length === 0" class="text-center text-gray-400 text-sm py-4">
+                    此時段無額外支出
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div v-if="view === 'detail' && currentEvent" class="flex-1 overflow-y-auto bg-slate-50 pb-24">
+        <div class="bg-white p-5 border-b shadow-sm">
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-800">{{ currentEvent.date }}</h2>
+                    <div class="mt-1 flex flex-wrap gap-1">
+                        <span v-for="loc in currentEvent.locations" class="text-sm bg-indigo-50 text-indigo-800 px-2 py-1 rounded border border-indigo-100 font-bold">
+                            <i class="fa-solid fa-building mr-1"></i> {{loc}}
+                        </span>
+                    </div>
+                </div>
+                <button @click="showBookingModal = true" class="text-xs bg-blue-50 text-blue-600 px-3 py-2 rounded-lg font-bold border border-blue-200 hover:bg-blue-100 whitespace-nowrap">
+                    <i class="fa-solid fa-pen-to-square mr-1"></i> 修改訂場
+                </button>
+            </div>
+            
+            <div class="bg-orange-50 border border-orange-200 rounded-lg p-2 px-3 flex justify-between items-center mb-4">
+                <span class="text-sm font-bold text-orange-800">人數上限</span>
+                <div class="flex items-center gap-2">
+                    <button @click="changeLimit(-1)" class="w-6 h-6 rounded bg-white border border-orange-200 text-orange-600">-</button>
+                    <span class="font-mono font-bold">{{ currentEvent.maxParticipants }}</span>
+                    <button @click="changeLimit(1)" class="w-6 h-6 rounded bg-white border border-orange-200 text-orange-600">+</button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
+                <div><div class="text-xs text-gray-500">總場費</div><div class="font-bold">${{ currentFinancials.totalCost }}</div></div>
+                <div><div class="text-xs text-gray-500">總收入</div><div class="font-bold">${{ currentFinancials.totalIncome }}</div></div>
+                <div><div class="text-xs text-gray-500">結餘</div><div :class="currentFinancials.balance >= 0 ? 'text-emerald-600' : 'text-red-600'" class="font-bold">{{ currentFinancials.balance }}</div></div>
+            </div>
+        </div>
+
+        <div class="flex border-b bg-white sticky top-0 z-20">
+            <button @click="tab = 'schedule'" :class="tab === 'schedule' ? 'border-b-2 border-emerald-500 text-emerald-700' : 'text-gray-500'" class="flex-1 py-3 text-sm font-bold transition">時間表</button>
+            <button @click="tab = 'money'" :class="tab === 'money' ? 'border-b-2 border-emerald-500 text-emerald-700' : 'text-gray-500'" class="flex-1 py-3 text-sm font-bold transition">名單 & 結算</button>
+        </div>
+
+        <div v-if="tab === 'schedule'" class="p-4 space-y-3">
+             <div v-for="(group, time) in scheduleGrouped" :key="time" class="bg-white rounded-lg shadow-sm border p-3">
+                 <div class="font-bold text-slate-700 border-b pb-1 mb-2 flex items-center"><i class="fa-regular fa-clock mr-2"></i> {{ time }} - {{ getEndTime(time) }}</div>
+                 <div v-for="b in group" class="flex flex-col py-2 border-b last:border-0 border-dashed border-gray-100">
+                     <div class="flex justify-between items-center">
+                        <div class="flex items-center gap-2">
+                            <span class="bg-indigo-100 text-indigo-800 text-[10px] font-bold px-1.5 py-0.5 rounded">{{ b.location }}</span>
+                            <span class="bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-0.5 rounded">{{ b.courtNo }} 號場</span>
+                        </div>
+                        <span class="text-xs text-gray-400 bg-gray-50 px-1 border rounded">${{ b.price }}</span>
+                     </div>
+                     <div class="mt-1 ml-1 text-sm font-medium text-gray-800">{{ b.bookerName }}</div>
+                 </div>
+             </div>
+        </div>
+
+        <div v-if="tab === 'money'" class="p-4 space-y-6">
+            <div>
+                <h3 class="font-bold text-gray-700 mb-2 text-sm flex justify-between">
+                    <span>正選名單 ({{currentEvent.participants.length}}/{{currentEvent.maxParticipants}})</span>
+                    <span v-if="currentEvent.participants.length>=currentEvent.maxParticipants" class="text-red-500 text-xs">滿額</span>
+                </h3>
+                <transition-group name="list" tag="div" class="bg-white rounded-lg shadow-sm border border-gray-200 divide-y relative">
+                    <div v-for="(p, idx) in currentEvent.participants" :key="p.name" class="p-3 flex items-center justify-between hover:bg-gray-50">
+                        <div class="flex items-center">
+                            <span class="w-6 h-6 bg-slate-100 rounded-full text-center text-xs text-gray-500 flex items-center justify-center mr-2 shrink-0">{{idx+1}}</span>
+                            <div>
+                                <div class="flex items-center">
+                                    <span class="font-medium text-gray-800 mr-2">{{ p.name }}</span>
+                                    <span v-if="isPersonBooker(p.name)" class="text-[10px] font-bold bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded">訂</span>
+                                </div>
+                                <div v-if="p.location" class="text-[10px] text-gray-400 mt-0.5"><i class="fa-solid fa-location-arrow mr-1"></i>{{ p.location }}</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                             <button @click="togglePaid(p)" class="px-2 py-1 rounded text-xs font-bold transition border" :class="p.isPaid ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-500 border-red-100'">{{ p.isPaid ? '已付' : '未付' }}</button>
+                             <button v-if="!isPersonBooker(p.name)" @click="removeParticipant(idx)" class="text-gray-300 hover:text-red-500 w-6"><i class="fa-solid fa-trash"></i></button>
+                             <div v-else class="w-6"></div> 
+                        </div>
+                    </div>
+                </transition-group>
+            </div>
+            
+            <div v-if="currentEvent.waitingList?.length > 0">
+                <h3 class="font-bold text-gray-700 mb-2 text-sm">候補名單</h3>
+                <div class="bg-orange-50 rounded-lg border border-dashed border-orange-200 divide-y divide-orange-100">
+                    <div v-for="(wp, idx) in currentEvent.waitingList" :key="wp.name" class="p-3 flex justify-between">
+                        <span class="text-orange-800 text-sm font-bold">{{idx+1}}. {{wp.name}} <span class="text-xs font-normal" v-if="wp.location">({{wp.location}})</span></span>
+                        <button @click="removeFromWaiting(idx)" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex gap-2 items-center bg-slate-100 p-2 rounded-lg">
+                <select v-if="currentEvent.locations.length > 1" v-model="newParticipantLocation" class="w-1/3 text-xs p-2 rounded border border-gray-300 bg-white">
+                    <option value="">(場地?)</option>
+                    <option v-for="l in currentEvent.locations" :value="l">{{l}}</option>
+                </select>
+                <input type="text" v-model="newParticipantName" @keyup.enter="addParticipant" placeholder="名字" class="flex-1 p-2 border rounded border-gray-300 text-sm outline-none">
+                <button @click="addParticipant" class="bg-slate-800 text-white px-3 py-2 rounded font-bold hover:bg-slate-700"><i class="fa-solid fa-plus"></i></button>
+            </div>
+
+            <div class="pt-6 border-t mt-6">
+                 <h3 class="font-bold text-gray-700 mb-2 text-sm"><i class="fa-solid fa-file-invoice-dollar mr-1"></i> 訂場人結算</h3>
+                 <div v-for="s in bookerSettlements" class="bg-white border rounded-lg p-3 mb-2 flex justify-between items-center shadow-sm">
+                     <div class="text-xs">
+                         <div class="font-bold text-base text-gray-800">{{s.name}}</div>
+                         <div class="text-gray-500 mt-1">墊支 ${{s.paidForCourts}} <span v-if="s.isParticipant" class="bg-gray-100 px-1 rounded ml-1">- 參加費 $70</span></div>
+                     </div>
+                     <div class="text-right">
+                         <div class="font-bold text-xl" :class="s.netAmount >= 0 ? 'text-emerald-600' : 'text-red-600'">{{ s.netAmount >= 0 ? '+' : '' }}{{ s.netAmount }}</div>
+                     </div>
+                 </div>
+            </div>
+            <button @click="deleteEvent(currentEvent.id)" class="w-full mt-4 text-red-400 text-xs py-2 hover:text-red-600 hover:bg-red-50 rounded transition">刪除此活動</button>
+        </div>
+    </div>
+
+    <transition name="modal">
+        <div v-if="showConfigModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm p-4">
+            <div class="bg-white w-full max-w-md rounded-xl shadow-2xl overflow-hidden">
+                <div class="bg-slate-900 text-white p-4 font-bold flex justify-between">
+                    <span>設定雲端同步 (JSONBin)</span>
+                    <button @click="showConfigModal = false">&times;</button>
+                </div>
+                <div class="p-6">
+                    <div class="space-y-4">
+                        <div><label class="block text-xs font-bold text-gray-500 mb-1">Bin ID</label><input type="text" v-model="config.binId" class="w-full p-2 border rounded font-mono text-sm bg-gray-50"></div>
+                        <div><label class="block text-xs font-bold text-gray-500 mb-1">X-Master-Key</label><input type="text" v-model="config.apiKey" class="w-full p-2 border rounded font-mono text-sm bg-gray-50"></div>
+                    </div>
+                    <button @click="saveConfig" class="w-full mt-6 bg-slate-900 text-white py-3 rounded-lg font-bold">儲存</button>
+                </div>
+            </div>
+        </div>
+    </transition>
+
+    <transition name="modal">
+        <div v-if="showBookingModal" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black bg-opacity-50 p-0 sm:p-4">
+            <div class="bg-white w-full max-w-lg sm:rounded-xl rounded-t-2xl shadow-2xl flex flex-col max-h-[95vh]">
+                <div class="p-4 border-b flex justify-between bg-slate-50 sm:rounded-t-xl font-bold items-center">
+                    <span>{{ isCreating ? '新活動' : '修改活動' }}</span> <button @click="showBookingModal=false" class="text-xl">&times;</button>
+                </div>
+                <div class="p-4 overflow-y-auto flex-1 space-y-4">
+                    <div class="bg-indigo-50 p-3 rounded border border-indigo-100">
+                        <label class="text-xs text-indigo-800 font-bold">日期</label>
+                        <input type="date" v-model="tempEvent.date" class="w-full p-2 border rounded mb-3 bg-white">
+                        <label class="text-xs text-indigo-800 font-bold flex justify-between">場館名稱 (可多個)<button @click="addLocation" class="text-indigo-600 hover:text-indigo-900"><i class="fa-solid fa-plus-circle"></i></button></label>
+                        <div v-for="(loc, idx) in tempEvent.locations" :key="idx" class="flex gap-2 mb-2">
+                            <input type="text" v-model="tempEvent.locations[idx]" placeholder="例如: 體育館A" class="flex-1 p-2 border rounded bg-white text-sm">
+                            <button v-if="tempEvent.locations.length > 1" @click="tempEvent.locations.splice(idx,1)" class="text-red-400 px-2"><i class="fa-solid fa-trash"></i></button>
+                        </div>
+                    </div>
+                    <div v-for="(b, i) in tempBookings" :key="i" class="border rounded p-3 relative shadow-sm bg-white">
+                        <button @click="tempBookings.splice(i,1)" class="absolute -top-2 -right-2 bg-red-100 text-red-500 w-6 h-6 rounded-full flex items-center justify-center shadow hover:bg-red-500 hover:text-white transition"><i class="fa-solid fa-times text-xs"></i></button>
+                        <div class="mb-2"><select v-model="b.location" class="w-full p-1.5 text-xs border rounded bg-slate-50 font-bold text-slate-700"><option v-for="l in tempEvent.locations" :value="l">{{l}}</option></select></div>
+                        <div class="flex gap-2 mb-2">
+                            <input v-model="b.bookerName" placeholder="訂場人姓名" class="w-full border p-1.5 rounded font-bold text-gray-800">
+                            <select v-model.number="b.price" class="border p-1.5 rounded bg-white"><option :value="50">$50</option><option :value="60">$60</option></select>
+                        </div>
+                        <div class="flex gap-2">
+                            <select v-model="b.timeSlot" class="w-1/2 border p-1.5 rounded bg-white text-sm"><option v-for="t in timeOptions" :value="t.value">{{t.label}}</option></select>
+                            <select v-model.number="b.courtNo" class="w-1/2 border p-1.5 rounded bg-white text-sm"><option v-for="n in 12" :value="n">{{n}}號場</option></select>
+                        </div>
+                        <label class="flex items-center mt-2 text-xs text-gray-600 select-none cursor-pointer"><input type="checkbox" v-model="b.isParticipant" class="mr-1.5 w-4 h-4 text-emerald-600"> 這位訂場人也是參加者</label>
+                    </div>
+                    <button @click="addTempBooking" class="w-full py-3 border-2 border-dashed border-gray-300 rounded text-gray-500 font-bold text-sm hover:border-emerald-400 hover:text-emerald-500 transition">+ 增加一節訂場</button>
+                </div>
+                <div class="p-4 border-t bg-slate-50 sm:rounded-b-xl">
+                    <button @click="saveBookings" class="w-full py-3 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 transition">儲存並去重覆</button>
+                </div>
+            </div>
+        </div>
+    </transition>
+</div>
+
+<script>
+    const { createApp, ref, computed, onMounted, watch } = Vue;
+
+    createApp({
+        setup() {
+            const view = ref('list');
+            const tab = ref('money');
+            const events = ref([]);
+            const expenses = ref([]); // 新增：雜費列表
+            const currentEventId = ref(null);
+            const syncStatus = ref('idle'); 
+            const showConfigModal = ref(false);
+            const config = ref({ binId: '', apiKey: '' });
+            const isCloudEnabled = computed(() => config.value.binId && config.value.apiKey);
+            
+            const showBookingModal = ref(false);
+            const isCreating = ref(false);
+            const tempEvent = ref({ locations: [] });
+            const tempBookings = ref([]);
+            const newParticipantName = ref('');
+            const newParticipantLocation = ref('');
+            
+            // 財務中心相關
+            const today = new Date();
+            const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+            const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+            const financeStart = ref(firstDay);
+            const financeEnd = ref(lastDay);
+            const newExpense = ref({ date: new Date().toISOString().split('T')[0], desc: '', amount: '' });
+
+            const timeOptions = [];
+            for(let i=7;i<23;i++) timeOptions.push({value: `${i.toString().padStart(2,'0')}:00`, label: `${i}:00-${i+1}:00`});
+
+            const loadData = async () => {
+                const localConfig = localStorage.getItem('badminton_config');
+                if (localConfig) config.value = JSON.parse(localConfig);
+                const localDB = localStorage.getItem('badminton_full_db');
+                
+                // 遷移舊資料邏輯
+                if(localDB) {
+                    const parsed = JSON.parse(localDB);
+                    if(Array.isArray(parsed)) {
+                        events.value = parsed; // 舊格式
+                        expenses.value = [];
+                    } else {
+                        events.value = parsed.events || []; // 新格式
+                        expenses.value = parsed.expenses || [];
+                    }
+                }
+                
+                // 遷移 Locations
+                events.value.forEach(e => {
+                    if(e.location && !e.locations) e.locations = [e.location];
+                    if(!e.bookings) e.bookings = [];
+                    e.bookings.forEach(b => { if(!b.location && e.locations.length>0) b.location = e.locations[0]; });
+                });
+
+                if (isCloudEnabled.value) {
+                    syncStatus.value = 'syncing';
+                    try {
+                        const res = await fetch(`https://api.jsonbin.io/v3/b/${config.value.binId}`, {
+                            headers: { 'X-Master-Key': config.value.apiKey }
+                        });
+                        if (!res.ok) throw new Error('Cloud Error');
+                        const data = await res.json();
+                        
+                        // 雲端資料遷移
+                        const record = data.record;
+                        if(Array.isArray(record)) {
+                            events.value = record;
+                            expenses.value = [];
+                        } else {
+                            events.value = record.events || [];
+                            expenses.value = record.expenses || [];
+                        }
+
+                        events.value.forEach(e => {
+                            if(e.location && !e.locations) e.locations = [e.location];
+                            e.bookings.forEach(b => { if(!b.location && e.locations.length>0) b.location = e.locations[0]; });
+                        });
+                        syncStatus.value = 'success';
+                    } catch (e) { syncStatus.value = 'error'; }
+                }
+            };
+
+            const saveData = async () => {
+                // 儲存為物件格式 { events, expenses }
+                const payload = { events: events.value, expenses: expenses.value };
+                
+                localStorage.setItem('badminton_full_db', JSON.stringify(payload));
+                
+                if (isCloudEnabled.value) {
+                    syncStatus.value = 'syncing';
+                    try {
+                        const res = await fetch(`https://api.jsonbin.io/v3/b/${config.value.binId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', 'X-Master-Key': config.value.apiKey },
+                            body: JSON.stringify(payload) // 傳送整個物件
+                        });
+                        if (!res.ok) throw new Error('Save Error');
+                        syncStatus.value = 'success';
+                    } catch (e) { syncStatus.value = 'error'; }
+                }
+            };
+
+            const saveConfig = () => { localStorage.setItem('badminton_config', JSON.stringify(config.value)); showConfigModal.value = false; loadData(); };
+            let timeout = null;
+            // 監聽 events 和 expenses 的變化
+            watch([events, expenses], () => { clearTimeout(timeout); timeout = setTimeout(saveData, 1000); }, { deep: true });
+            onMounted(loadData);
+
+            const currentEvent = computed(() => events.value.find(e => e.id === currentEventId.value));
+            const sortedEvents = computed(() => [...events.value].sort((a,b) => new Date(b.date)-new Date(a.date)));
+            const isPast = (dateStr) => dateStr < new Date().toISOString().split('T')[0];
+
+            const getEventFinancials = (e) => {
+                const cost = e.bookings.reduce((s,b)=>s+b.price,0);
+                const income = e.participants.length*70;
+                return { cost, income, balance: income-cost };
+            };
+            
+            const currentFinancials = computed(() => {
+                if(!currentEvent.value) return {};
+                return { totalCost: getEventFinancials(currentEvent.value).cost, totalIncome: getEventFinancials(currentEvent.value).income, balance: getEventFinancials(currentEvent.value).balance };
+            });
+            const getEventBalance = (e) => getEventFinancials(e).balance;
+            
+            // --- 財務統計邏輯 ---
+            const financeStats = computed(() => {
+                const start = financeStart.value;
+                const end = financeEnd.value;
+                
+                // 1. 篩選活動
+                const filteredEvents = events.value.filter(e => e.date >= start && e.date <= end);
+                let income = 0;
+                let courtCost = 0;
+                filteredEvents.forEach(e => {
+                    const f = getEventFinancials(e);
+                    income += f.income;
+                    courtCost += f.cost;
+                });
+                const periodEventSurplus = income - courtCost;
+
+                // 2. 篩選雜費
+                const filteredExpenses = expenses.value.filter(e => e.date >= start && e.date <= end).sort((a,b) => new Date(b.date)-new Date(a.date));
+                const periodExpenses = filteredExpenses.reduce((s, e) => s + (e.amount || 0), 0);
+
+                return {
+                    income,
+                    courtCost,
+                    periodEventSurplus,
+                    filteredExpenses,
+                    periodExpenses,
+                    finalBalance: periodEventSurplus - periodExpenses
+                };
+            });
+
+            const addExpense = () => {
+                if(!newExpense.value.desc || !newExpense.value.amount) return alert('請輸入項目和金額');
+                expenses.value.push({
+                    id: Date.now(),
+                    date: newExpense.value.date,
+                    desc: newExpense.value.desc,
+                    amount: newExpense.value.amount
+                });
+                newExpense.value.desc = '';
+                newExpense.value.amount = '';
+            };
+            const deleteExpense = (id) => {
+                if(confirm('刪除此支出記錄?')) expenses.value = expenses.value.filter(e => e.id !== id);
+            };
+
+            const bookerSettlements = computed(() => {
+                if(!currentEvent.value) return [];
+                const map = {};
+                currentEvent.value.bookings.forEach(b => {
+                    if(!map[b.bookerName]) map[b.bookerName] = {name:b.bookerName, paidForCourts:0};
+                    map[b.bookerName].paidForCourts += b.price;
+                });
+                return Object.values(map).map(i => {
+                    const isP = currentEvent.value.participants.some(p=>p.name===i.name);
+                    return { ...i, isParticipant: isP, netAmount: i.paidForCourts - (isP?70:0) };
+                });
+            });
+            const scheduleGrouped = computed(() => {
+                 if(!currentEvent.value) return {};
+                 const g = {};
+                 [...currentEvent.value.bookings].sort((a,b)=>a.timeSlot.localeCompare(b.timeSlot)||a.courtNo-b.courtNo).forEach(b => { if(!g[b.timeSlot]) g[b.timeSlot]=[]; g[b.timeSlot].push(b); });
+                 return g;
+            });
+
+            const startNewEvent = () => {
+                isCreating.value = true;
+                tempEvent.value = { date: new Date().toISOString().split('T')[0], locations: [''], maxParticipants: 7 };
+                tempBookings.value = [{bookerName:'', price:50, timeSlot:'19:00', courtNo:1, location: '', isParticipant:true}];
+                showBookingModal.value = true;
+            };
+
+            const openEvent = (id) => {
+                currentEventId.value = id;
+                const e = currentEvent.value;
+                if(!e.waitingList) e.waitingList = [];
+                if(!e.maxParticipants) e.maxParticipants = 7;
+                tempEvent.value = { date:e.date, locations: [...e.locations], maxParticipants:e.maxParticipants };
+                tempBookings.value = JSON.parse(JSON.stringify(e.bookings));
+                tempBookings.value.forEach(b => b.isParticipant = e.participants.some(p=>p.name===b.bookerName));
+                isCreating.value = false;
+                view.value = 'detail';
+            };
+
+            const addLocation = () => tempEvent.value.locations.push('');
+            
+            const addTempBooking = () => {
+                const last = tempBookings.value[tempBookings.value.length-1];
+                tempBookings.value.push({ 
+                    bookerName: last?.bookerName||'', 
+                    price: last?.price||50, 
+                    timeSlot: last?.timeSlot||'19:00', 
+                    courtNo: (last?.courtNo<12?last.courtNo+1:1)||1, 
+                    location: last?.location || tempEvent.value.locations[0] || '',
+                    isParticipant: true 
+                });
+            };
+
+            const saveBookings = () => {
+                tempEvent.value.locations = tempEvent.value.locations.map(l=>l.trim()).filter(l=>l);
+                if(tempEvent.value.locations.length === 0) return alert('請至少輸入一個場地名稱');
+                tempBookings.value.forEach(b => b.bookerName = b.bookerName.trim());
+                if(tempBookings.value.some(b => !b.bookerName)) return alert('請輸入訂場人姓名');
+                tempBookings.value.forEach(b => { if(!b.location || !tempEvent.value.locations.includes(b.location)) b.location = tempEvent.value.locations[0]; });
+
+                const bookings = tempBookings.value.map(({isParticipant,...r})=>r);
+                const shouldBeParticipant = new Set();
+                tempBookings.value.forEach(b => { if(b.isParticipant) shouldBeParticipant.add(b.bookerName); });
+
+                if(isCreating.value) {
+                    let participantsList = [];
+                    shouldBeParticipant.forEach(name => participantsList.push({ name: name, isPaid: false, location: '' }));
+                    events.value.push({ id: Date.now(), ...tempEvent.value, waitingList: [], bookings, participants: participantsList });
+                    view.value = 'list';
+                } else {
+                    const e = currentEvent.value;
+                    e.date = tempEvent.value.date;
+                    e.locations = tempEvent.value.locations;
+                    e.maxParticipants = tempEvent.value.maxParticipants;
+                    e.bookings = bookings;
+                    const pMap = new Map();
+                    e.participants.forEach(p => pMap.set(p.name, p));
+                    shouldBeParticipant.forEach(name => { if(!pMap.has(name)) pMap.set(name, { name: name, isPaid: false, location: '' }); });
+                    e.participants = Array.from(pMap.values());
+                }
+                showBookingModal.value = false;
+            };
+            
+            const changeLimit = (d) => {
+                const e = currentEvent.value;
+                e.maxParticipants = (e.maxParticipants||7)+d;
+                if(e.maxParticipants<1) e.maxParticipants=1;
+                while(e.waitingList.length > 0 && e.participants.length < e.maxParticipants) e.participants.push(e.waitingList.shift());
+            };
+            const addParticipant = () => {
+                const n = newParticipantName.value.trim();
+                if(!n) return;
+                const e = currentEvent.value;
+                if(e.participants.some(p=>p.name===n) || e.waitingList.some(p=>p.name===n)) return alert('已存在');
+                const newP = {name:n, isPaid:false, location: newParticipantLocation.value || ''};
+                if(e.participants.length < e.maxParticipants) e.participants.push(newP); else e.waitingList.push(newP);
+                newParticipantName.value = '';
+            };
+            const removeParticipant = (i) => { if(!confirm('移除此參加者?')) return; const e = currentEvent.value; e.participants.splice(i,1); if(e.waitingList.length>0) e.participants.push(e.waitingList.shift()); };
+            const togglePaid = (p) => p.isPaid = !p.isPaid;
+            const deleteEvent = (id) => { if(confirm('確定刪除此活動?')) events.value = events.value.filter(e=>e.id!==id); view.value='list'; };
+            
+            return {
+                view, tab, events, sortedEvents, currentEvent, currentFinancials, isCloudEnabled, syncStatus, showConfigModal, config, saveConfig,
+                showBookingModal, isCreating, tempEvent, tempBookings, timeOptions, newParticipantName, newParticipantLocation,
+                bookerSettlements, scheduleGrouped, getEventBalance, getEndTime: (s)=>(parseInt(s)+1).toString().padStart(2,'0')+':00', 
+                isPersonBooker:(n)=>currentEvent.value?.bookings.some(b=>b.bookerName===n),
+                startNewEvent, openEvent, saveBookings, addTempBooking, getWeekDay:(d)=>['日','一','二','三','四','五','六'][new Date(d).getDay()],
+                changeLimit, addParticipant, removeParticipant, togglePaid, deleteEvent, removeFromWaiting: (i)=>currentEvent.value.waitingList.splice(i,1),
+                isPast, addLocation,
+                // Finance returns
+                financeStart, financeEnd, financeStats, newExpense, addExpense, deleteExpense
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
